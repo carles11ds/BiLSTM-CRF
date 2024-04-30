@@ -5,28 +5,29 @@ from utils import argmax, log_sum_exp
 torch.manual_seed(1)
 
 class BiLSTM_CRF(nn.Module):
-    def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim, dropout):
+    def __init__(self, vocab_size, tag_to_ix, embedding_dim, hidden_dim, dropout, device):
         super(BiLSTM_CRF, self).__init__()
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
         self.vocab_size = vocab_size
         self.tag_to_ix = tag_to_ix
         self.tagset_size = len(tag_to_ix)
+        self.device = device
         
         # Embedding layer
-        self.word_embeds = nn.Embedding(vocab_size, embedding_dim)
+        self.word_embeds = nn.Embedding(vocab_size, embedding_dim).to(self.device)
         
         # BiLSTM layer
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim // 2, num_layers=1, bidirectional=True)
+        self.lstm = nn.LSTM(embedding_dim, hidden_dim // 2, num_layers=1, bidirectional=True).to(self.device)
 
         # Dropout layer to not overfit
-        self.dropout = nn.Dropout(p=dropout)
+        self.dropout = nn.Dropout(p=dropout).to(self.device)
         
         # Linear layer to project the tags
-        self.hidden2tag = nn.Linear(hidden_dim, self.tagset_size)
+        self.hidden2tag = nn.Linear(hidden_dim, self.tagset_size).to(self.device)
         
         # CRF tansition matrix
-        self.transitions = nn.Parameter(torch.randn(self.tagset_size, self.tagset_size))
+        self.transitions = nn.Parameter(torch.randn(self.tagset_size, self.tagset_size)).to(self.device)
         
         # Restriction to avoid invalid transitions
         self.transitions.data[tag_to_ix["<START>"], :] = -10000
@@ -35,12 +36,12 @@ class BiLSTM_CRF(nn.Module):
         self.hidden = self.init_hidden()
         
     def init_hidden(self):
-        return (torch.randn(2, 1, self.hidden_dim // 2),
-                torch.randn(2, 1, self.hidden_dim // 2))
+        return (torch.randn(2, 1, self.hidden_dim // 2).to(self.device),
+                torch.randn(2, 1, self.hidden_dim // 2).to(self.device))
         
     def _forward_alg(self, feats):
         # Forward algorithm to calculate the partition function 
-        init_alphas = torch.full((1, self.tagset_size), -10000.)
+        init_alphas = torch.full((1, self.tagset_size), -10000.).to(self.device)
         init_alphas[0][self.tag_to_ix["<START>"]] = 0.
         
         forward_var = init_alphas
@@ -67,8 +68,8 @@ class BiLSTM_CRF(nn.Module):
         return lstm_feats
     
     def _score_sentence(self, feats, tags):
-        score = torch.zeros(1)
-        tags = torch.cat([torch.tensor([self.tag_to_ix["<START>"]], dtype=torch.long), tags])
+        score = torch.zeros(1).to(self.device)
+        tags = torch.cat([torch.tensor([self.tag_to_ix["<START>"]], dtype=torch.long).to(self.device), tags])
         for i, feat in enumerate(feats):
             score = score + self.transitions[tags[i + 1], tags[i]] + feat[tags[i + 1]]
         score = score + self.transitions[self.tag_to_ix["<STOP>"], tags[-1]]
@@ -77,7 +78,7 @@ class BiLSTM_CRF(nn.Module):
     def _viterbi_decode(self, feats):
         # Viterbi algorithm to decode the sequence of tags
         backpointers = []
-        init_vvars = torch.full((1, self.tagset_size), -10000.)
+        init_vvars = torch.full((1, self.tagset_size), -10000.).to(self.device)
         init_vvars[0][self.tag_to_ix["<START>"]] = 0
         forward_var = init_vvars
         for feat in feats:
